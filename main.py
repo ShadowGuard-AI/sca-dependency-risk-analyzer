@@ -32,6 +32,10 @@ def get_dependencies(requirements_file: str) -> List[str]:
     """
     try:
         with open(requirements_file, "r") as f:
+            # This list is only ever counted. safety re-reads the file itself, so
+            # option lines like -r or --index-url ride along here as if they
+            # were dependencies in my count, while safety treats them as its own
+            # instructions. The two views of the file can disagree.
             dependencies = [s for line in f if (s := line.strip()) and not s.startswith("#")] # Ignore comments and empty lines, including indented comments
         return dependencies
     except FileNotFoundError:
@@ -93,6 +97,10 @@ def calculate_risk_score(vulnerability: Dict) -> int:
     Returns:
         An integer representing the risk score.
     """
+    # A missing severity is scored as LOW at 30, but an unrecognised
+    # severity word falls to 10. An entry safety could not grade at all
+    # therefore ranks below one it graded low, purely by which default
+    # path the word took.
     severity = vulnerability.get("severity", "LOW").upper()
 
     if severity == "CRITICAL":
@@ -158,6 +166,9 @@ def save_report(report: List[Dict], output_file: str):
             json.dump(report, f, indent=4)
         logging.info(f"Report saved to: {output_file}")
     except Exception as e:
+        # A failed save is only logged. main returns normally and the run
+        # exits 0 with no report on disk, so automation watching the exit
+        # code believes the report exists.
         logging.error(f"Error saving report to file: {e}")
 
 
@@ -193,6 +204,10 @@ def main():
     vulnerabilities = run_safety_check(args.requirements, ignore_vulns)
 
 
+    # An empty result takes the other branch and writes no report at all.
+    # A dependency_report.json from an earlier run is left sitting in
+    # place, indistinguishable from a fresh clean result unless its
+    # timestamp is checked.
     if vulnerabilities:
         report = generate_report(vulnerabilities)
         save_report(report, args.output)
