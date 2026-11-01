@@ -32,7 +32,7 @@ def get_dependencies(requirements_file: str) -> List[str]:
     """
     try:
         with open(requirements_file, "r") as f:
-            dependencies = [line.strip() for line in f if line.strip() and not line.startswith("#")] # Ignore comments and empty lines
+            dependencies = [s for line in f if (s := line.strip()) and not s.startswith("#")] # Ignore comments and empty lines, including indented comments
         return dependencies
     except FileNotFoundError:
         logging.error(f"Requirements file not found: {requirements_file}")
@@ -63,23 +63,20 @@ def run_safety_check(requirements_file: str, ignore_vulns: List[str]) -> Dict:
                 command.extend(["--ignore", vuln_id])
 
 
-        result = subprocess.run(command, capture_output=True, text=True, check=False)  # capture_output and text were added; check=False added
-        if result.returncode == 0:  # Changed from != 0. safety returns code 0 even if vulnerabilities are found!
-            if result.stdout:  # Check if there is output before parsing
-                try:
-                    return json.loads(result.stdout)
-                except json.JSONDecodeError as e:
-                    logging.error(f"Error decoding safety output: {e}. Output was: {result.stdout}")
-                    return {}
-            else:
-                logging.info("Safety check completed with no vulnerabilities found.")
-                return {}
-        else:
-            logging.error(f"Safety check failed with error: {result.stderr}")
-            return {}
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        # safety reports found vulnerabilities with a non zero exit code, so
+        # stdout is parsed whenever it is present, whatever the exit code.
+        if result.stdout and result.stdout.strip():
+            try:
+                return json.loads(result.stdout)
+            except json.JSONDecodeError as e:
+                logging.error(f"Safety check failed: output could not be decoded: {e}")
+                sys.exit(1)
+        logging.error("Safety check failed: no usable output from safety.")
+        sys.exit(1)
     except FileNotFoundError:
-        logging.error("Safety command not found. Ensure 'safety' is installed and in your PATH.")
-        return {}
+        logging.error("Safety is not installed. Install safety and make sure it is in your PATH.")
+        sys.exit(1)
     except Exception as e:
         logging.error(f"An unexpected error occurred while running safety check: {e}")
         return {}
@@ -110,29 +107,41 @@ def calculate_risk_score(vulnerability: Dict) -> int:
         return 10
 
 
-def generate_report(vulnerabilities: List[Dict]) -> List[Dict]:
+def generate_report(vulnerabilities) -> List[Dict]:
     """
     Generates a report containing information about vulnerable dependencies and their risk scores.
 
     Args:
-        vulnerabilities: A list of vulnerability dictionaries.
+        vulnerabilities: A list of vulnerability dictionaries, or an object
+            holding a vulnerabilities list.
 
     Returns:
         A list of dictionaries, where each dictionary represents a vulnerable dependency and its risk score.
     """
+    if isinstance(vulnerabilities, dict):
+        vulnerabilities = vulnerabilities.get("vulnerabilities", [])
+    if not isinstance(vulnerabilities, list):
+        logging.error("Safety output has an unexpected shape. Expected a list or an object with a vulnerabilities list.")
+        return []
     report = []
+    skipped = 0
     for vulnerability in vulnerabilities:
+        if not isinstance(vulnerability, dict) or not vulnerability.get("package_name") or not vulnerability.get("vulnerability_id"):
+            skipped += 1
+            continue
         risk_score = calculate_risk_score(vulnerability)
         report_entry = {
-            "dependency": vulnerability["package_name"],
-            "version": vulnerability["analyzed_version"],
-            "vulnerability_id": vulnerability["vulnerability_id"],
-            "severity": vulnerability["severity"],
+            "dependency": vulnerability.get("package_name"),
+            "version": vulnerability.get("analyzed_version", "unknown"),
+            "vulnerability_id": vulnerability.get("vulnerability_id"),
+            "severity": vulnerability.get("severity", "LOW"),
             "risk_score": risk_score,
-            "advisory": vulnerability["advisory"],
-            "more_info_url": vulnerability["more_info_url"]
+            "advisory": vulnerability.get("advisory", ""),
+            "more_info_url": vulnerability.get("more_info_url", "")
         }
         report.append(report_entry)
+    if skipped:
+        logging.warning(f"Skipped {skipped} entries with missing fields.")
     return report
 
 
@@ -165,6 +174,11 @@ def main():
 
     if not isinstance(args.output, str):
         logging.error("Output file path must be a string.")
+        sys.exit(1)
+
+    import os as _os
+    if _os.path.realpath(args.output) == _os.path.realpath(args.requirements):
+        logging.error("Output path must not equal the requirements file path.")
         sys.exit(1)
 
     ignore_vulns = [vuln_id.strip() for vuln_id in args.ignore.split(',') if vuln_id.strip()]  # Split and strip the ignore list
