@@ -4,17 +4,21 @@ Analyzes a project's software dependencies by reading the requirements file name
 If the `safety` command is not found, the run exits 1 with a plain not installed message. The run also refuses at exit 1 when the resolved `--output` path equals the resolved requirements path.
 
 ## Install
-`git clone https://github.com/ShadowStrikeHQ/sca-dependency-risk-analyzer`
+`git clone https://github.com/ShadowGuard-AI/sca-dependency-risk-analyzer`
 `pip install -r requirements.txt`
 
+The install names `safety`. The code does not import `safety`; it runs the `safety` command as a subprocess, so that command must be installed and on the PATH.
+
 ## Usage
-`./sca-dependency-risk-analyzer [params]`
+`python3 main.py [-r requirements.txt] [-o dependency_report.json] [--ignore ID,ID]`
+
+Example: `python3 main.py -r requirements.txt -o report.json --ignore CVE-2020-0001,CVE-2021-0002`
 
 ## Parameters
-- `-h`: Show help message and exit
-- `-r`: Path to the requirements.txt file.
-- `-o`: Path to the output report file.
-- `--ignore`: Comma-separated list of vulnerability IDs to ignore.
+- `-h, --help`: Show help message and exit
+- `-r, --requirements`: Path to the requirements.txt file. (default: `requirements.txt`)
+- `-o, --output`: Path to the output report file. (default: `dependency_report.json`)
+- `--ignore`: Comma-separated list of vulnerability IDs to ignore. (default: empty)
 
 ## License
-Copyright (c) ShadowStrikeHQ
+MIT License. See LICENSE.
